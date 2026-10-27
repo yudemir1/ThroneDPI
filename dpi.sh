@@ -233,10 +233,14 @@ cmd_status() {
     done <<< "$(services)"
     printf '  DNS   : %s\n' "$seen"
     # En kritik tek gösterge: engelli bir ad sinkhole'a mı çözülüyor?
-    local probe; probe=$(dig +short +time=4 discord.com A 2>/dev/null | head -1)
-    if [[ "$probe" == "195.175.254.2" ]]; then
+    # dig, zaman aşımında hata metnini de stdout'a basar; "boş değil" demek
+    # cevap geldi demek DEĞİL. Bu yüzden IPv4 biçimi arıyoruz.
+    local probe; probe=$(dig +short +time=4 discord.com A 2>/dev/null | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$')
+    if [[ -z "$probe" ]]; then
+        warn "DNS cevap vermiyor (discord.com çözülemedi)"
+    elif [[ "$probe" == "195.175.254.2" ]]; then
         warn "DNS sinkhole'a düşüyor ($probe) — DoH devrede değil"
-    elif [[ -n "$probe" ]]; then
+    else
         ok "DNS temiz (discord.com -> $probe)"
     fi
     [[ -f "$LOG" ]] && printf '  log   : %s (son: %s)\n' "$LOG" "$(tail -1 "$LOG" 2>/dev/null | cut -c1-60)"
