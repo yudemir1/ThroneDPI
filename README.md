@@ -164,23 +164,25 @@ Sitenin **varlıklarının** ayrı bir alan adından gelebileceğini unutmayın.
 sahibinden'in CSS/JS dosyaları `shbdn.com` üzerinde; yalnızca `sahibinden.com`
 istisnaya alındığında sayfa açılıyor ama bomboş görünüyordu.
 
-### İnatçı siteler: TCP seviyesinde parçalama
+### Kayıt parçalamanın yetmediği siteler
 
-Bazı siteler için kayıt parçalama yetmez; TLS el sıkışması yine resetlenir
-(`SSL_ERROR_SYSCALL`, sunucunun `illegal parameter` reddinden farklıdır).
-Bunlara ek olarak `tls_fragment` uygulanabilir — daha yavaştır, bu yüzden
-yalnızca gereken alan adlarına verilir:
+Bazı sitelerde TLS el sıkışması resetlenir (`SSL_ERROR_SYSCALL`) — bu,
+sunucunun `illegal parameter` ile reddetmesinden farklıdır ve DPI'nın
+bağlantıyı kestiği anlamına gelir. Bu durumda kayıt parçalama yetmez;
+ek olarak TCP seviyesinde parçalama denenebilir. Yavaş olduğu için global
+değil, yalnızca gereken alan adlarına verin:
 
 ```json
 {
-  "domain_suffix": [ "misli.com", "nesine.com" ],
+  "domain_suffix": [ "ornek.com" ],
   "action": "route-options",
   "tls_fragment": true
 }
 ```
 
-Bu kural global kayıt parçalama kuralından **sonra** gelir; ikisi de nihai
-olmayan `route-options` olduğu için etkileri birikir.
+Bu kural global kayıt parçalama kuralından **sonra** gelmeli; ikisi de nihai
+olmayan `route-options` olduğu için etkileri birikir. Her sitede işe
+yaramayabilir: IP seviyesinde engellenen siteler bu araçla açılmaz.
 
 `/usr/local/etc/thronedpi/tun.json` içinde bu listeye alan adını ekleyin, sonra:
 
