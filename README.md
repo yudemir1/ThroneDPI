@@ -79,6 +79,32 @@ ve hijack edilir. `dpi off` ayarı DHCP'ye geri döndürür.
 `1.1.1.1` bilinçli bir seçim: sing-box bir şekilde ölürse düz DNS olarak
 çalışmaya devam eder (engelli adlar hariç), yani internet tamamen kesilmez.
 
+### Watchdog
+
+sing-box uyku/uyanma ve ağ değişimlerinde varsayılan rotayı kaybedebiliyor.
+Logda şöyle görünür:
+
+```
+ERROR network: missing default interface
+```
+
+Bu olduğunda süreç ayakta kalır, `utun` arayüzü de durur, ama varsayılan rota
+fiziksel arayüze döner ve **bypass sessizce devre dışı kalır** — hiçbir hata
+görmezsiniz, siteler yine açılmaz.
+
+`dpi on` bu yüzden ikinci bir launchd işi kurar: dakikada bir varsayılan
+rotaya bakar, `utun` üzerinde değilse sing-box'ı yeniden başlatıp DNS'i tekrar
+sabitler. `dpi off` yapıldığında ana plist silindiği için watchdog hiçbir şeye
+karışmaz; ağ tamamen yoksa (Wi-Fi kapalı) da boşuna uğraşmaz.
+
+Onarım yaptığında sistem günlüğüne yazar — Console.app'te `thronedpi` aratın:
+
+```bash
+log show --last 1h --predicate 'eventMessage CONTAINS "thronedpi"' --info
+```
+
+Kontrol aralığını değiştirmek için `WD_INTERVAL=30 sudo -E ./dpi.sh on`.
+
 ## Kurulum
 
 ```bash
@@ -154,9 +180,12 @@ DNS sabitlenmemiş demektir. `sudo dpi off && sudo dpi on` deneyin.
 
 ```
 ! TUN aktif değil (trafik doğrudan gidiyor)
+! watchdog kapalı
 ```
 
-sing-box ayağa kalkmamış. Logda sebebi yazar:
+sing-box ayağa kalkmamış ya da rotasını kaybetmiş. Watchdog açıksa bunu bir
+dakika içinde kendisi onarır; kapalıysa `sudo dpi off && sudo dpi on`. Logda
+sebebi yazar:
 
 ```bash
 tail -30 /var/log/singbox-dpi.log

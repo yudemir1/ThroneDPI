@@ -21,16 +21,17 @@ set -uo pipefail
 
 # Script'in gerçek bulunduğu dizin. Kurulumda /usr/local/bin/dpi olarak
 # kopyalandığı ya da symlink'lendiği için dirname tek başına yetmez.
-resolve_dir() {
+resolve_self() {
     local src="${BASH_SOURCE[0]}" dir
     while [[ -L "$src" ]]; do
         dir="$(cd -P "$(dirname "$src")" && pwd)"
         src="$(readlink "$src")"
         [[ "$src" != /* ]] && src="${dir}/${src}"
     done
-    cd -P "$(dirname "$src")" && pwd
+    printf '%s/%s' "$(cd -P "$(dirname "$src")" && pwd)" "$(basename "$src")"
 }
-HERE="$(resolve_dir)"
+SELF="$(resolve_self)"
+HERE="$(dirname "$SELF")"
 
 # Yapılandırmayı sırayla ara: açık env > script'in yanı > kurulum yeri.
 # Böylece hem depodan doğrudan çalıştırılabilir hem de kurulduktan sonra
@@ -44,6 +45,14 @@ done
 LABEL="dpi.singbox.tun"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 LOG="/var/log/singbox-dpi.log"
+
+# Watchdog: sing-box uyku/uyanma ve ağ değişimlerinde varsayılan rotayı
+# kaybedebiliyor ("network: missing default interface"). Süreç ayakta kalır,
+# utun arayüzü de durur, ama varsayılan rota fiziksel arayüze döner ve bypass
+# sessizce devre dışı kalır. Periyodik bir kontrol bunu yakalayıp onarır.
+WD_LABEL="dpi.singbox.watchdog"
+WD_PLIST="/Library/LaunchDaemons/${WD_LABEL}.plist"
+WD_INTERVAL="${WD_INTERVAL:-60}"
 SINGBOX="${SINGBOX:-$(command -v sing-box || echo /opt/homebrew/bin/sing-box)}"
 
 log()  { printf '\033[1;34m[dpi]\033[0m %s\n' "$*"; }
@@ -79,6 +88,81 @@ flush_dns() {
 # 1.1.1.1 seçildi çünkü sing-box bir şekilde ölürse düz DNS olarak da
 # çalışmaya devam eder (engelli adlar hariç) — internet tamamen kesilmez.
 DNS_PIN="${DNS_PIN:-1.1.1.1}"
+
+install_watchdog() {
+    cat > "$WD_PLIST" <<WD_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${WD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${SELF}</string>
+        <string>_watchdog</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>${WD_INTERVAL}</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
+WD_EOF
+    chown root:wheel "$WD_PLIST"; chmod 0644 "$WD_PLIST"
+    launchctl bootout "system/${WD_LABEL}" 2>/dev/null || true
+    if launchctl bootstrap system "$WD_PLIST" 2>/dev/null; then
+        ok "watchdog açık (her ${WD_INTERVAL}s kontrol)"
+    else
+        warn "watchdog kurulamadı; TUN kendini onarmaz"
+    fi
+}
+
+remove_watchdog() {
+    if launchctl print "system/${WD_LABEL}" >/dev/null 2>&1; then
+        launchctl bootout "system/${WD_LABEL}" 2>/dev/null || true
+    fi
+    if [[ -f "$WD_PLIST" ]]; then
+        rm -f "$WD_PLIST"
+        ok "watchdog kaldırıldı"
+    fi
+    return 0
+}
+
+# launchd tarafından periyodik çağrılır. Sessizdir; yalnızca onarım yaparsa
+# sistem günlüğüne yazar (Console.app'te "thronedpi" aratın).
+cmd_watchdog() {
+    # dpi off yapılmışsa plist yoktur: kullanıcının kararına karışma.
+    [[ -f "$PLIST" ]] || exit 0
+    tun_up && exit 0
+
+    # Ağ tamamen yoksa (Wi-Fi kapalı, uyanma anı) yeniden başlatmanın anlamı
+    # yok; bir sonraki turda zaten tekrar bakacak.
+    local iface
+    iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
+    [[ -n "$iface" ]] || exit 0
+
+    logger -t thronedpi "TUN rotasi kayip (rota: ${iface}) - sing-box yeniden baslatiliyor"
+    launchctl kickstart -k "system/${LABEL}" 2>/dev/null || exit 0
+
+    local waited=0
+    while (( waited < 20 )); do
+        tun_up && break
+        sleep 0.5
+        waited=$(( waited + 1 ))
+    done
+
+    if tun_up; then
+        pin_dns >/dev/null 2>&1
+        logger -t thronedpi "TUN onarildi"
+    else
+        logger -t thronedpi "TUN onarilamadi"
+    fi
+    exit 0
+}
 
 pin_dns() {
     local svc n=0
@@ -167,6 +251,7 @@ PLIST_EOF
         # DNS'i TUN kalktıktan SONRA sabitliyoruz: TUN kalkmazsa aşağıdaki
         # geri alma yolunda sistemi değiştirilmiş DNS'le bırakmayalım.
         pin_dns
+        install_watchdog
         log "AÇIK — tüm uygulamalar kapsanıyor."
         ok "TUN arayüzü: $(route -n get 1.1.1.1 2>/dev/null | awk '/interface:/{print $2}')"
         ok "log: $LOG"
@@ -183,6 +268,10 @@ PLIST_EOF
 
 cmd_off() {
     need_root off
+
+    # Önce watchdog: aksi halde biz hizmeti durdururken o araya girip
+    # yeniden başlatabilir.
+    remove_watchdog
 
     if is_loaded; then
         # bootout SIGTERM gönderir, gerekirse SIGKILL'e yükseltir. sing-box
@@ -219,6 +308,11 @@ cmd_status() {
         ok "TUN aktif -> $(route -n get 1.1.1.1 2>/dev/null | awk '/interface:/{print $2}')"
     else
         warn "TUN aktif değil (trafik doğrudan gidiyor)"
+    fi
+    if launchctl print "system/${WD_LABEL}" >/dev/null 2>&1; then
+        ok "watchdog açık (her ${WD_INTERVAL}s)"
+    else
+        warn "watchdog kapalı"
     fi
     printf '  süreç : %s\n' "$(pgrep -f 'sing-box run' | tr '\n' ' ' || echo yok)"
     printf '  rota  : %s\n' "$(route -n get 1.1.1.1 2>/dev/null | awk '/interface:/{print $2}')"
@@ -276,5 +370,6 @@ case "${1:-status}" in
     off)    cmd_off ;;
     status) cmd_status ;;
     test)   cmd_test ;;
+    _watchdog) cmd_watchdog ;;
     *)      echo "kullanım: $0 {on|off|status|test}" >&2; exit 1 ;;
 esac
