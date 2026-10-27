@@ -1,47 +1,77 @@
 {
-  "log": { "level": "warn", "timestamp": true },
-
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
   "dns": {
     "servers": [
-      { "tag": "doh",  "type": "https", "server": "1.1.1.1" },
-      { "tag": "doh2", "type": "https", "server": "8.8.8.8" }
+      {
+        "tag": "doh",
+        "type": "https",
+        "server": "1.1.1.1"
+      },
+      {
+        "tag": "doh2",
+        "type": "https",
+        "server": "8.8.8.8"
+      }
     ],
     "strategy": "ipv4_only",
     "final": "doh"
   },
-
   "inbounds": [
     {
       "type": "tun",
       "tag": "tun-in",
-      "address": [ "172.19.0.1/30" ],
+      "address": [
+        "172.19.0.1/30"
+      ],
       "auto_route": true,
       "strict_route": true,
       "stack": "gvisor"
     }
   ],
-
   "outbounds": [
-    { "type": "direct", "tag": "direct" }
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
   ],
-
   "route": {
     "default_domain_resolver": "doh",
     "auto_detect_interface": true,
     "final": "direct",
     "rules": [
-      { "action": "sniff" },
-      { "protocol": "dns", "action": "hijack-dns" },
-      { "ip_is_private": true, "outbound": "direct" },
-
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      },
       {
         "domain_suffix": [
-          "sahibinden.com"
+          "sahibinden.com",
+          "shbdn.com"
         ],
         "outbound": "direct"
       },
-
-      { "action": "route-options", "tls_record_fragment": true }
+      {
+        "action": "route-options",
+        "tls_record_fragment": true
+      },
+      {
+        "domain_suffix": [
+          "misli.com",
+          "nesine.com"
+        ],
+        "action": "route-options",
+        "tls_fragment": true
+      }
     ]
   }
 }

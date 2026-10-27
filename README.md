@@ -153,11 +153,34 @@ yapılandırmadaki istisna listesi var:
 ```json
 {
   "domain_suffix": [
-    "sahibinden.com"
+    "sahibinden.com",
+    "shbdn.com"
   ],
   "outbound": "direct"
 }
 ```
+
+Sitenin **varlıklarının** ayrı bir alan adından gelebileceğini unutmayın.
+sahibinden'in CSS/JS dosyaları `shbdn.com` üzerinde; yalnızca `sahibinden.com`
+istisnaya alındığında sayfa açılıyor ama bomboş görünüyordu.
+
+### İnatçı siteler: TCP seviyesinde parçalama
+
+Bazı siteler için kayıt parçalama yetmez; TLS el sıkışması yine resetlenir
+(`SSL_ERROR_SYSCALL`, sunucunun `illegal parameter` reddinden farklıdır).
+Bunlara ek olarak `tls_fragment` uygulanabilir — daha yavaştır, bu yüzden
+yalnızca gereken alan adlarına verilir:
+
+```json
+{
+  "domain_suffix": [ "misli.com", "nesine.com" ],
+  "action": "route-options",
+  "tls_fragment": true
+}
+```
+
+Bu kural global kayıt parçalama kuralından **sonra** gelir; ikisi de nihai
+olmayan `route-options` olduğu için etkileri birikir.
 
 `/usr/local/etc/thronedpi/tun.json` içinde bu listeye alan adını ekleyin, sonra:
 
